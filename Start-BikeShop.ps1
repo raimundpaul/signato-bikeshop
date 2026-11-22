@@ -5,6 +5,11 @@ $mime = @{ ".html" = "text/html; charset=utf-8"; ".js" = "text/javascript; chars
            ".css" = "text/css"; ".json" = "application/json"; ".png" = "image/png";
            ".jpg" = "image/jpeg"; ".ico" = "image/x-icon" }
 
+# Ollama (echtes LLM) parallel starten, falls installiert — Seite faellt sonst auf Regex zurueck
+$env:OLLAMA_ORIGINS = "*"
+$ollama = Get-Command ollama -ErrorAction SilentlyContinue
+if ($ollama) { Start-Process -WindowStyle Hidden -FilePath "ollama" -ArgumentList "serve" }
+
 $server = New-Object System.Net.Sockets.TcpListener([System.Net.IPAddress]::Loopback, 8124)
 $server.Start()
 Write-Host "SIGNATO BikeShop laeuft auf http://localhost:8124  (Strg+C zum Beenden)"

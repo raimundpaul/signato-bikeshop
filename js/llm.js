@@ -6,20 +6,85 @@
 
 const LLM = {
 
-  parse(text) {
+  // --- echtes LLM via Ollama (localhost, kein Key noetig) mit Regex-Fallback ---
+  OLLAMA_URL: 'http://localhost:11434/api/chat',
+  OLLAMA_MODEL: 'llama3.2:3b',
+  llmActive: false,
+
+  SYS_PROMPT: `Du extrahierst aus einer deutschen Bike-Shop-Anfrage einen strukturierten Intent als JSON.
+Antworte NUR mit JSON, kein Text drumherum. Schema:
+{
+ "type": "buy"|"parts"|"defect"|"order"|"finish"|"confirm"|"reset"|"unknown",
+ "frameId": "mtb"|"fully"|"trekking"|"gravel"|"road"|"emtb"|"etrek"|"kids"|null,
+ "ebike": true|false|null,
+ "battery": "bt400"|"bt625"|"bt750"|null,
+ "motor": "hub"|"mid"|null,
+ "groupset": "base"|"deore"|"xt12"|"ultegra"|null,
+ "tire": "std"|"slick28"|"tour35"|"gravel45"|"mtb225"|null,
+ "wheelset": "std"|"aero"|"trail"|"erated"|"kids24"|null,
+ "color": "std"|"rot"|"orange"|"gelb"|"gruen"|"blau"|"violett"|null,
+ "size": "xs"|"s"|"m"|"l"|"xl"|null,
+ "signature": "sig_klassik"|"sig_modern"|"sig_hand"|null,
+ "budget": <Zahl in Euro oder null>,
+ "bottle"|"stand"|"seatpost"|"shock"|"bag"|"lock"|"childseat"|"fender"|"rack"|"light"|"extrabat": true|false|null
+}
+Regeln: "type"=parts bei Ersatzteil/Zubehoer-Anfrage fuer Bestandsbike, "defect" bei kaputt/beschaedigt,
+"order" bei "bestelle/lege ... in den korb", "finish" bei fertig/abschluss, "confirm" bei ok/ja/passt,
+"reset" bei reset. Kids-Fahrrad -> frameId "kids". "efully" -> ebike true. Fehlende Felder -> null.`,
+
+  async parse(text) {
+    const t = text.toLowerCase().trim();
+    // schnelle Meta-Intents lokal abfangen (kein Roundtrip noetig)
+    if (/^fertig|^abschl|^checkout|^das wars|^das war's/.test(t)) return { type: 'finish' };
+    if (/^(ok|okay|ja|passt|stimmt|genau|yep)\b/.test(t)) return { type: 'confirm' };
+    if (/^reset/.test(t)) return { type: 'reset' };
+    if (/^bestell|in den korb|in den warenkorb/.test(t)) return { type: 'order', text };
+    const llm = await this._ollama(text);
+    if (llm) { this.llmActive = true; return llm; }
+    this.llmActive = false;
+    return this._parseRegex(text);
+  },
+
+  async _ollama(text) {
+    try {
+      const r = await fetch(this.OLLAMA_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(5000),
+        body: JSON.stringify({
+          model: this.OLLAMA_MODEL, stream: false, format: 'json',
+          messages: [
+            { role: 'system', content: this.SYS_PROMPT },
+            { role: 'user', content: text },
+          ],
+        }),
+      });
+      if (!r.ok) return null;
+      const j = await r.json();
+      const o = JSON.parse(j.message.content);
+      if (!o || typeof o !== 'object' || !o.type) return null;
+      const intent = { type: o.type };
+      for (const k of ['frameId','ebike','battery','motor','groupset','tire','wheelset','color','size','signature','budget',
+                       'bottle','stand','seatpost','shock','bag','lock','childseat','fender','rack','light','extrabat'])
+        if (o[k] !== null && o[k] !== undefined) intent[k] = o[k];
+      return intent;
+    } catch { return null; }
+  },
+
+  _parseRegex(text) {
     const t = text.toLowerCase();
     if (/^bestell|in den korb|in den warenkorb/.test(t)) return { type: 'order', text };
     const intent = { type: 'buy' };
 
     // --- Flow: Ersatzteil / Zubehör für Bestandsbike ---
     if (/defekt|kaputt|beschädigt|beschaedigt|schaden|reparier|platt|kratzer|gebrochen|quietsc/.test(t)) intent.type = 'defect';
-    else if (/zubeh[öo]|zubehoe|zubehör|ersatz|spare|welcher akku|welche batterie|pass.*akku|brauch.*(akku|batterie)|stärker.*akku|größer.*akku|nachrüst|nachruest|aufrüst|aufruest|upgrade/.test(t)) intent.type = 'parts';
+    else if (/zubeh[öo]|zubehoe|zubehör|\bzub\b|ersatz|spare|welcher akku|welche batterie|pass.*akku|brauch.*(akku|batterie)|stärker.*akku|größer.*akku|nachrüst|nachruest|aufrüst|aufruest|upgrade/.test(t)) intent.type = 'parts';
 
     // --- Rahmentyp ---
     if (/e-?fully/.test(t)) intent.ebike = true;
     if (/e-mtb|emtb/.test(t)) { intent.ebike = true; intent.frameId = 'emtb'; }
     else if (/e-?trek|etrek/.test(t)) { intent.ebike = true; intent.frameId = 'etrek'; }
-    else if (/\be-?bikes?\b|pedelec|elektro|\bmotor\b/.test(t)) intent.ebike = true;
+    else if (/\be-?bikes?\b|pedelec|elektro|\bmotor\b|e-?renn/.test(t)) intent.ebike = true;
     if (/mtb|mountain|montain|mountin|hardtail|geländerad|trailrad/.test(t) && !intent.frameId) intent.frameId = 'mtb';
     if (/fully|vollgefedert|fullsuspension|enduro|downhill/.test(t)) intent.frameId = 'fully';
     if (/trekking|treking|tourenrad|touringrad|alltagsrad/.test(t)) intent.frameId = intent.ebike ? 'etrek' : 'trekking';
@@ -95,7 +160,7 @@ const LLM = {
     if (/^(ok|okay|ja|passt|stimmt|genau|yep)\b/.test(t.trim())) return { type: 'confirm' };
     if (/^reset/.test(t)) return { type: 'reset' };
     // leere Anfrage → nichts Verstandenes
-    const meaningful = ['frameId','ebike','battery','motor','fender','rack','light','groupset','budget',
+    const meaningful = intent.type !== 'buy' || ['frameId','ebike','battery','motor','fender','rack','light','groupset','budget',
                         'bottle','stand','seatpost','shock','bag','lock','childseat','signature','size','wheelset','extrabat','color']
       .some(k => intent[k] !== undefined);
     if (!meaningful && !/bike|fahrrad|rad|akku|kauf|brauche|suche|will|hätte|haette|konfig/.test(t))

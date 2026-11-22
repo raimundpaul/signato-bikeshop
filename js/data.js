@@ -98,7 +98,7 @@ const OPTION_GROUPS = {
   ],
   bag: [
     { id: "none", name: "ohne Tasche",      price: 0 },
-    { id: "bag",  name: "Rahmentasche",     price: 49, only: ["gravel", "mtb", "emtb", "trekking"] },
+    { id: "bag",  name: "Rahmentasche",     price: 49, only: ["gravel", "mtb", "emtb", "trekking", "etrek"] },
   ],
   lock: [
     { id: "none", name: "ohne Schloss",     price: 0 },

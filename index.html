@@ -68,8 +68,9 @@
   <div id="livepanel"></div>
   <div id="chat"></div>
   <div id="input">
-    <input id="q" placeholder="z.B. 'ebike mtb mit großem akku und schutzblech unter 3500' oder 'ersatzakku für etrekking'" autofocus>
+    <input id="q" placeholder="z.B. 'ebike mtb mit großem akku und schutzblech unter 3500' oder 'ersatzakku für etrekking'" autocomplete="off" autofocus>
     <button onclick="send()">Senden</button>
+    <span id="eng" title="Welcher Parser hat geantwortet" style="align-self:center;font-size:11px;color:var(--muted)"></span>
   </div>
 </div>
 
@@ -79,6 +80,7 @@
 <script>
 let _pending = null, _lastIntent = null;
 let cart = JSON.parse(localStorage.getItem('bikecart') || '[]');
+let myBikes = JSON.parse(localStorage.getItem('mybikes') || '[]');
 
 function renderCart() {
   // nur unbezahlte Positionen; bezahlte wandern unter "Bestelltes Zubehör" ans Bike
@@ -101,10 +103,21 @@ function renderCart() {
 function checkout() {
   const open = cart.filter(c => !c.paid);
   if (!open.length) { bubble("Warenkorb ist leer.", 'bot'); return; }
-  open.forEach(c => c.paid = true);
+  let newBikes = 0;
+  open.forEach(c => {
+    c.paid = true;
+    if (c.isBike) {
+      myBikes.push({ frameId: c.frameId, config: c.config,
+        date: new Date().toISOString().slice(0, 7) });
+      newBikes++;
+    }
+  });
   localStorage.setItem('bikecart', JSON.stringify(cart));
+  localStorage.setItem('mybikes', JSON.stringify(myBikes));
   renderCart(); renderOwned();
-  bubble(`Bezahlung abgeschlossen ✓ — ${open.length} Position${open.length > 1 ? 'en' : ''} gebucht.\nDie Artikel liegen jetzt unter „Bestelltes Zubehör" beim jeweiligen Bike.\n(Demo-Checkout — hier käme Payment/Order-Management.)`, 'bot');
+  bubble(`Bezahlung abgeschlossen ✓ — ${open.length} Position${open.length > 1 ? 'en' : ''} gebucht.` +
+    (newBikes ? `\n${newBikes === 1 ? 'Dein neues Bike steht' : 'Deine neuen Bikes stehen'} jetzt unter „Meine Bikes".` : '') +
+    `\n(Demo-Checkout — hier käme Payment/Order-Management.)`, 'bot');
 }
 renderCart();
 
@@ -125,14 +138,15 @@ document.getElementById('options').innerHTML = Object.entries(OPTION_GROUPS).map
 // Kundenkonto: gekaufte Räder anzeigen, Klick → kompatible Varianten
 document.getElementById('customer').textContent = CUSTOMER.name;
 function renderOwned() {
-  document.getElementById('owned').innerHTML = '<div style="font-size:11px;color:var(--muted);margin:6px 0 4px;letter-spacing:1px;text-transform:uppercase">Meine Bikes</div>' + CUSTOMER.owned.map(fid => {
+  const bikes = CUSTOMER.owned.map(fid => ({ fid, order: CUSTOMER.orders.find(o => o.frameId === fid) }))
+    .concat(myBikes.map((b, i) => ({ fid: b.frameId, order: { items: b.config.split(', '), config: b.config, date: b.date } })));
+  document.getElementById('owned').innerHTML = '<div style="font-size:11px;color:var(--muted);margin:6px 0 4px;letter-spacing:1px;text-transform:uppercase">Meine Bikes</div>' + bikes.map(({ fid, order }) => {
     const f = FRAMES.find(x => x.id === fid);
-    const order = CUSTOMER.orders.find(o => o.frameId === fid);
     const equip = order && order.items
       ? `<details style="margin-top:4px" onclick="event.stopPropagation()"><summary style="font-size:11px;color:var(--muted);cursor:pointer">Ausstattung (Custom Order)</summary>` +
         order.items.map(x => `<div class="opt">• ${x}</div>`).join('') + '</details>'
       : '';
-    const mine = cart.map((c, i) => ({ ...c, i })).filter(c => c.frameId === fid && c.paid);
+    const mine = cart.map((c, i) => ({ ...c, i })).filter(c => c.frameId === fid && c.paid && !c.isBike);
     const drop = `<details style="margin-top:4px" onclick="event.stopPropagation()"><summary style="font-size:11px;color:var(--accent);cursor:pointer">Bestelltes Zubehör (${mine.length})</summary>` +
       (mine.length
         ? mine.map(c => `<div class="opt">✓ ${c.item} <small>· ${c.ts}</small> <a href="#" onclick="event.stopPropagation();cart.splice(${c.i},1);localStorage.setItem('bikecart',JSON.stringify(cart));renderCart();renderOwned();return false" style="color:#f88">✕</a></div>`).join('')
@@ -159,7 +173,7 @@ function showVariants(fid) {
   let txt = `Varianten für dein <b>${f.name}</b>:`;
   if (r.parts.length) txt += `<br>Ersatzakku: ` + r.parts.map(p => `${p.name} ${p.price} €`).join(' · ');
   // kompatibel normal / inkompatibel ausgegraut, je Optionsgruppe
-  txt += Object.entries(OPTION_GROUPS).map(([g, opts]) => {
+  txt += Object.entries(OPTION_GROUPS).filter(([g]) => !['color', 'size', 'signature'].includes(g)).map(([g, opts]) => {
     const compat = new Set(Rules.compatOptions(f, g).map(o => o.id));
     const items = opts.filter(o => o.id !== 'none').map(o =>
       compat.has(o.id)
@@ -168,10 +182,34 @@ function showVariants(fid) {
     return items.length ? `<br><small style="color:#868e96">${g}:</small> ` + items.join(' · ') : '';
   }).join('');
   bubble(txt, 'bot', true);
-  const orderable = Object.keys(OPTION_GROUPS).flatMap(g =>
-    Rules.compatOptions(f, g).filter(o => o.id !== 'none' && !o.spare));
-  const chips = [...r.parts, ...orderable].map(o => `lege ${o.name} in den korb`);
-  if (chips.length) chipRow(chips.slice(0, 8));
+  // zweistufig: Kategorie-Chips → Klick zeigt die Optionen der Gruppe als Korb-Chips
+  const groups = Object.keys(OPTION_GROUPS).filter(g =>
+    !['color', 'size', 'signature'].includes(g) &&
+    Rules.compatOptions(f, g).some(o => o.id !== 'none' && !o.spare));
+  const d = document.createElement('div');
+  d.className = 'chiprow';
+  groups.forEach(g => {
+    const b = document.createElement('button');
+    b.className = 'chip'; b.textContent = ZUB_LABEL[g] || g;
+    b.onclick = () => showGroup(fid, g);
+    d.appendChild(b);
+  });
+  document.getElementById('chat').appendChild(d);
+  if (r.parts.length) chipRow(r.parts.map(o => `lege ${o.name} in den korb`));
+  d.scrollIntoView();
+}
+
+const ZUB_LABEL = { motor:'motor', battery:'akku', extrabat:'zusatzakku', groupset:'schaltung',
+  tire:'reifen', fender:'schutzblech', rack:'gepäckträger', light:'licht', bottle:'flaschenhalter',
+  stand:'ständer', seatpost:'sattelstütze', shock:'dämpfer', bag:'rahmentasche', lock:'schloss',
+  childseat:'kindersitz', signature:'signatur', color:'farbe', size:'größe', wheelset:'laufräder' };
+
+// Kategorie geklickt → verbaubare Optionen dieser Gruppe als Korb-Chips
+function showGroup(fid, g) {
+  const f = FRAMES.find(x => x.id === fid);
+  const opts = Rules.compatOptions(f, g).filter(o => o.id !== 'none' && !o.spare);
+  bubble(`${ZUB_LABEL[g] || g} für dein ${f.name}:`, 'bot');
+  chipRow(opts.map(o => `lege ${o.name} in den korb`));
 }
 
 function bubble(text, cls, html) {
@@ -252,7 +290,8 @@ function orderBuild() {
   const parts = Object.keys(c).filter(k => k !== 'frame')
     .map(k => c[k]).filter(o => o && o.id !== 'none' && o.id !== 'std')
     .map(o => o.name).join(', ');
-  cart.push({ item: `${b.frame.name} Custom (${parts || 'Basis'}${_sigText ? ` · Signatur "${_sigText}"` : ''}) — ${b.price} €`,
+  cart.push({ isBike: true, frameId: b.frame.id, config: parts || 'Basis', price: b.price,
+    item: `${b.frame.name} Custom (${parts || 'Basis'}${_sigText ? ` · Signatur "${_sigText}"` : ''}) — ${b.price} €`,
     frameId: b.frame.id, paid: false,
     ts: new Date().toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' }) });
   localStorage.setItem('bikecart', JSON.stringify(cart));
@@ -280,7 +319,7 @@ function guidePick(group, id, label) {
 
 let _awaitSig = false, _sigText = null;
 
-function send() {
+async function send() {
   const q = document.getElementById('q');
   const text = q.value.trim(); if (!text) return;
   q.value = '';
@@ -309,7 +348,8 @@ function send() {
     return;
   }
 
-  const intent = LLM.parse(text);
+  const intent = await LLM.parse(text);
+  document.getElementById('eng').textContent = LLM.llmActive ? '🧠 llm' : '🔤 regex';
 
   // Modellwechsel mitten im Guide → Rückfrage statt Kontext-Bruch
   if (_lastIntent && intent.type === 'buy' && intent.frameId && intent.frameId !== _lastIntent.frameId && !_pending) {
@@ -429,7 +469,7 @@ function run(intent) {
     const f = FRAMES.find(x => x.id === intent.frameId);
     if (intent.type === 'defect') {
       // Guided-Service: welches Teil ist beschädigt? → nur verbaubare Teile als Auswahl
-      const parts = Object.keys(OPTION_GROUPS).flatMap(g =>
+      const parts = Object.keys(OPTION_GROUPS).filter(g => !['color', 'size', 'signature'].includes(g)).flatMap(g =>
         Rules.compatOptions(f, g).filter(o => o.id !== 'none'));
       bubble(`Okay — was ist an deinem ${f.name} beschädigt?`, 'bot');
       chipRow(parts.slice(0, 10).map(o => `lege ${o.name} in den korb (Ersatz)`));
