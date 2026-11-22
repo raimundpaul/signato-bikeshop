@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>SIGNATO — Custom Bike Configurator</title>
+<style>
+  :root { --accent: #e8590c; --ink: #212529; --muted: #868e96; --line: #e9ecef; --soft: #f8f9fa; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; margin: 0; display: flex; height: 100vh; background: var(--soft); color: var(--ink); }
+  #side { width: 310px; background: #fff; color: var(--ink); padding: 20px 16px; overflow-y: auto; border-right: 1px solid var(--line); display: flex; flex-direction: column; }
+  #sidefoot { margin-top: auto; padding-top: 16px; font-size: 11px; color: var(--muted); border-top: 1px solid var(--line); }
+  #side h2 { display: inline; }
+  #side details { margin-top: 16px; }
+  #side summary { cursor: pointer; list-style: none; }
+  #side summary::-webkit-details-marker { display: none; }
+  #side summary::before { content: '▸ '; color: var(--muted); font-size: 12px; }
+  #side details[open] > summary::before { content: '▾ '; }
+  #side summary h2, #side summary h3 { display: inline; margin: 0; font-weight: 700; letter-spacing: .3px; }
+  #side .opt { font-size: 12px; color: var(--muted); margin-left: 14px; line-height: 1.5; }
+  #side small { color: var(--muted); }
+  .brand { font-size: 26px; font-weight: 800; letter-spacing: .5px; color: var(--ink); }
+  .brand small { display: block; font-size: 13px; font-weight: 400; color: var(--muted); letter-spacing: 2px; text-transform: uppercase; margin-top: 2px; }
+  #main { flex: 1; display: flex; flex-direction: column; }
+  #chat { flex: 1; overflow-y: auto; padding: 24px; }
+  .msg { max-width: 70%; margin: 10px 0; padding: 12px 16px; border-radius: 16px; white-space: pre-wrap; font-size: 14px; line-height: 1.5; }
+  .user { margin-left: auto; background: var(--ink); color: #fff; border-bottom-right-radius: 4px; }
+  .bot  { background: #fff; border: 1px solid var(--line); border-bottom-left-radius: 4px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  .cfg { display: inline-block; border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; margin: 6px 6px 0 0; cursor: pointer; background: #fff; vertical-align: top; box-shadow: 0 1px 3px rgba(0,0,0,.05); }
+  .cfg:hover { border-color: var(--accent); }
+  .cfg .price { color: var(--accent); font-weight: 700; }
+  #input { display: flex; padding: 14px 16px; gap: 10px; background: #fff; border-top: 1px solid var(--line); }
+  #input input { flex: 1; padding: 12px 14px; border: 1px solid var(--line); border-radius: 24px; font-size: 14px; outline: none; }
+  #input input:focus { border-color: var(--accent); }
+  #input button { padding: 12px 22px; border: 0; border-radius: 24px; background: var(--accent); color: #fff; font-weight: 600; cursor: pointer; }
+  .chiprow { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
+  .chip { padding: 6px 14px; border: 1px solid var(--line); border-radius: 20px; background: #fff; color: var(--ink); font-size: 13px; cursor: pointer; }
+  .chip:hover { border-color: var(--accent); color: var(--accent); }
+  .chip .cdot { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin-right: 6px; border: 1px solid var(--line); vertical-align: -1px; }
+  .chip.disabled { opacity: .4; cursor: not-allowed; text-decoration: line-through; }
+  .chip.disabled:hover { border-color: var(--line); color: var(--ink); }
+  .err { border-left: 3px solid #e03131; color: #c92a2a; }
+  .owned { margin: 8px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; cursor: pointer; font-size: 13px; background: var(--soft); }
+  .owned:hover { border-color: var(--accent); }
+  .owned small { color: var(--muted); }
+  .owned summary { font-size: 11px; cursor: pointer; }
+  #livepanel { position: fixed; right: 20px; bottom: 90px; width: 260px; background: #fff; border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 8px 24px rgba(0,0,0,.12); padding: 14px 16px; display: none; z-index: 10; }
+  #livepanel h4 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
+  #livepanel .lp-item { font-size: 13px; line-height: 1.6; color: var(--ink); }
+  #livepanel .lp-item small { color: var(--muted); }
+  #livepanel .lp-price { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 18px; font-weight: 700; color: var(--accent); }
+  #livepanel .lp-close { position: absolute; top: 8px; right: 12px; color: var(--muted); cursor: pointer; font-size: 14px; }
+</style>
+</head>
+<body>
+<div id="side">
+  <div class="brand">SIGNATO<small>Custom-Built Bikes<br>Est. '26 · by Ray &amp; Devin</small></div>
+  <details open style="margin-top:24px"><summary><h2 style="font-size:16px">👤 <span id="customer"></span></h2></summary><div id="owned"></div></details>
+  <details open><summary><h2 style="font-size:16px">Shop</h2></summary>
+    <details open><summary><h3 style="font-size:13px;margin:4px 0">Rahmen</h3></summary><div id="frames"></div></details>
+    <details><summary><h3 style="font-size:13px;margin:4px 0">Optionen</h3></summary><div id="options"></div></details>
+    <details><summary><h3 style="font-size:13px;margin:4px 0">Personalisierung</h3></summary>
+      <div class="opt">✍ Signatur auf dem Rahmen<br>3 Schrifttypen: Klassik · Modern · Handschrift<br>bis 12 Zeichen (Buchstaben + Ziffern) — 99 €<br><a href="#" onclick="document.getElementById('q').value='signatur';send();return false" style="color:var(--accent)">im Chat anfragen →</a></div>
+    </details>
+  </details>
+  <details open><summary><h2 style="font-size:16px">Warenkorb</h2></summary><div id="cart"></div></details>
+  <div id="sidefoot">© 2026 Devin &amp; Ray — App Design</div>
+</div>
+<div id="main">
+  <div id="livepanel"></div>
+  <div id="chat"></div>
+  <div id="input">
+    <input id="q" placeholder="z.B. 'ebike mtb mit großem akku und schutzblech unter 3500' oder 'ersatzakku für etrekking'" autofocus>
+    <button onclick="send()">Senden</button>
+  </div>
+</div>
+
+<script src="js/data.js"></script>
+<script src="js/rules.js"></script>
+<script src="js/llm.js"></script>
+<script>
+let _pending = null, _lastIntent = null;
+let cart = JSON.parse(localStorage.getItem('bikecart') || '[]');
+
+function renderCart() {
+  // nur unbezahlte Positionen; bezahlte wandern unter "Bestelltes Zubehör" ans Bike
+  const open = cart.map((c, i) => ({ ...c, i })).filter(c => !c.paid);
+  if (!open.length) { document.getElementById('cart').innerHTML = '<div class="opt">Ihr Warenkorb ist leer.</div>'; return; }
+  const priceOf = name => {
+    for (const g of Object.values(OPTION_GROUPS)) { const o = g.find(x => x.name === name); if (o) return o.price; }
+    return 0;
+  };
+  const sum = open.reduce((s, c) => s + priceOf(c.item), 0);
+  document.getElementById('cart').innerHTML =
+    open.map(c => {
+      const f = c.frameId ? FRAMES.find(x => x.id === c.frameId) : null;
+      const p = priceOf(c.item);
+      return `<div class="opt">${c.item}${f ? ` <small>→ ${f.name}</small>` : ''}${p ? ` <small>${p} €</small>` : ''} <a href="#" onclick="cart.splice(${c.i},1);localStorage.setItem('bikecart',JSON.stringify(cart));renderCart();renderOwned();return false" style="color:#f88">✕</a></div>`;
+    }).join('') +
+    `<div style="margin-top:8px;border-top:1px solid var(--line);padding-top:6px;font-size:12px"><b>Summe: ${sum} €</b><br><button onclick="checkout()" style="margin-top:6px;padding:6px 14px;border:0;border-radius:14px;background:var(--accent);color:#fff;cursor:pointer;font-size:12px">Zur Kasse</button></div>`;
+}
+
+function checkout() {
+  const open = cart.filter(c => !c.paid);
+  if (!open.length) { bubble("Warenkorb ist leer.", 'bot'); return; }
+  open.forEach(c => c.paid = true);
+  localStorage.setItem('bikecart', JSON.stringify(cart));
+  renderCart(); renderOwned();
+  bubble(`Bezahlung abgeschlossen ✓ — ${open.length} Position${open.length > 1 ? 'en' : ''} gebucht.\nDie Artikel liegen jetzt unter „Bestelltes Zubehör" beim jeweiligen Bike.\n(Demo-Checkout — hier käme Payment/Order-Management.)`, 'bot');
+}
+renderCart();
+
+document.getElementById('frames').innerHTML = FRAMES.map(f =>
+  `<div class="owned" style="padding:6px 8px" onclick="newConfig('${f.id}')"><b>${f.name}</b> <small>ab ${f.basePrice} €${f.e ? ' ⚡' : ''}</small></div>`).join('');
+
+// Rahmen-Klick → Neu-Konfiguration im Chat + passendes Zubehör
+function newConfig(fid) {
+  const f = FRAMES.find(x => x.id === fid);
+  bubble(`${f.name} konfigurieren`, 'user');
+  _pending = null;
+  run({ type: 'buy', frameId: fid });
+}
+document.getElementById('options').innerHTML = Object.entries(OPTION_GROUPS).map(([g, opts]) =>
+  `<div><b style="font-size:12px">${g}</b>` + opts.map(o =>
+    `<div class="opt">• ${o.name} +${o.price} €${o.only ? ' <i>nur ' + o.only.join(',') + '</i>' : ''}</div>`).join('') + '</div>').join('');
+
+// Kundenkonto: gekaufte Räder anzeigen, Klick → kompatible Varianten
+document.getElementById('customer').textContent = CUSTOMER.name;
+function renderOwned() {
+  document.getElementById('owned').innerHTML = '<div style="font-size:11px;color:var(--muted);margin:6px 0 4px;letter-spacing:1px;text-transform:uppercase">Meine Bikes</div>' + CUSTOMER.owned.map(fid => {
+    const f = FRAMES.find(x => x.id === fid);
+    const order = CUSTOMER.orders.find(o => o.frameId === fid);
+    const equip = order && order.items
+      ? `<details style="margin-top:4px" onclick="event.stopPropagation()"><summary style="font-size:11px;color:var(--muted);cursor:pointer">Ausstattung (Custom Order)</summary>` +
+        order.items.map(x => `<div class="opt">• ${x}</div>`).join('') + '</details>'
+      : '';
+    const mine = cart.map((c, i) => ({ ...c, i })).filter(c => c.frameId === fid && c.paid);
+    const drop = `<details style="margin-top:4px" onclick="event.stopPropagation()"><summary style="font-size:11px;color:var(--accent);cursor:pointer">Bestelltes Zubehör (${mine.length})</summary>` +
+      (mine.length
+        ? mine.map(c => `<div class="opt">✓ ${c.item} <small>· ${c.ts}</small> <a href="#" onclick="event.stopPropagation();cart.splice(${c.i},1);localStorage.setItem('bikecart',JSON.stringify(cart));renderCart();renderOwned();return false" style="color:#f88">✕</a></div>`).join('')
+        : '<div class="opt">— nichts bestellt —</div>') + '</details>';
+    return `<div class="owned" onclick="ownedBike('${fid}')"><b>${f.name}</b>${f.e ? ' ⚡' : ''}<br><small>${order ? order.config + ' · ' + order.date : ''}</small>${equip}${drop}</div>`;
+  }).join('');
+}
+renderOwned();
+
+let _lastOwned = null;
+// Bike-Klick → Falltyp-Menü (Ersatzteil / Zubehör / Defekt)
+function ownedBike(fid) { bikeMenu(fid); }
+function bikeMenu(fid) {
+  _lastOwned = fid;
+  const f = FRAMES.find(x => x.id === fid);
+  bubble(`Mein ${f.name}`, 'user');
+  bubble(`Was soll's sein — Ersatzteil, Zubehör oder ist was defekt?`, 'bot');
+  chipRow([`zubehör für ${f.name}`, `ersatzteil für ${f.name}`, `${f.name} ist defekt`]);
+}
+function showVariants(fid) {
+  _lastOwned = fid;
+  const f = FRAMES.find(x => x.id === fid);
+  const r = Rules.spareParts(fid, 'battery');
+  let txt = `Varianten für dein <b>${f.name}</b>:`;
+  if (r.parts.length) txt += `<br>Ersatzakku: ` + r.parts.map(p => `${p.name} ${p.price} €`).join(' · ');
+  // kompatibel normal / inkompatibel ausgegraut, je Optionsgruppe
+  txt += Object.entries(OPTION_GROUPS).map(([g, opts]) => {
+    const compat = new Set(Rules.compatOptions(f, g).map(o => o.id));
+    const items = opts.filter(o => o.id !== 'none').map(o =>
+      compat.has(o.id)
+        ? `<span>${o.name} <small>+${o.price} €</small></span>`
+        : `<span style="color:#c7c9cc;text-decoration:line-through" title="nicht verbaubar">${o.name}</span>`);
+    return items.length ? `<br><small style="color:#868e96">${g}:</small> ` + items.join(' · ') : '';
+  }).join('');
+  bubble(txt, 'bot', true);
+  const orderable = Object.keys(OPTION_GROUPS).flatMap(g =>
+    Rules.compatOptions(f, g).filter(o => o.id !== 'none' && !o.spare));
+  const chips = [...r.parts, ...orderable].map(o => `lege ${o.name} in den korb`);
+  if (chips.length) chipRow(chips.slice(0, 8));
+}
+
+function bubble(text, cls, html) {
+  const d = document.createElement('div');
+  d.className = 'msg ' + cls;
+  html ? d.innerHTML = text : d.textContent = text;
+  document.getElementById('chat').appendChild(d);
+  d.scrollIntoView();
+}
+
+function chipRow(labels) {
+  const d = document.createElement('div');
+  d.className = 'chiprow';
+  labels.forEach(l => {
+    const b = document.createElement('button');
+    b.className = 'chip'; b.textContent = l;
+    b.onclick = () => { document.getElementById('q').value = l; send(); };
+    d.appendChild(b);
+  });
+  document.getElementById('chat').appendChild(d);
+  d.scrollIntoView();
+}
+
+// Guide-Chips setzen die Option direkt — kein Parser (verhindert Fehlinterpretation
+// wie 'gravel 45mm' → Rahmen Gravel statt Reifen)
+function guideChips(picks) {
+  const d = document.createElement('div');
+  d.className = 'chiprow';
+  picks.forEach(p => {
+    const b = document.createElement('button');
+    b.className = 'chip' + (p.disabled ? ' disabled' : '');
+    if (p.hex) {
+      const dot = document.createElement('span');
+      dot.className = 'cdot'; dot.style.background = p.hex;
+      b.appendChild(dot);
+    }
+    b.appendChild(document.createTextNode(p.label));
+    if (p.disabled) { b.title = p.reason || 'nicht verbaubar'; }
+    else b.onclick = () => guidePick(p.group, p.id, p.label);
+    d.appendChild(b);
+  });
+  document.getElementById('chat').appendChild(d);
+  d.scrollIntoView();
+}
+
+// warum ist eine Option auf diesem Rahmen nicht verbaubar? (Tooltip-Text)
+function disabledReason(f, o) {
+  if (o.only && !o.only.includes(f.id)) return `gibt's nur für: ${o.only.map(i => FRAMES.find(x => x.id === i).name).join(', ')}`;
+  if ((o.except || []).includes(f.id)) return `nicht verbaubar auf ${f.name}`;
+  if (o.needsMounts && !f.fenderMounts) return `braucht Schutzblech-Aufnahmen — ${f.name} hat keine`;
+  if (o.needsBottleMounts && !f.bottleMounts) return `braucht Gewinde im Rahmendreieck — ${f.name} hat keins`;
+  if (o.needsStandMounts && !f.standMounts) return `braucht KSA-Aufnahme — ${f.name} hat keine`;
+  if (o.needsMounts === 'rack' && !f.rackMounts) return `braucht Gepäckträger-Aufnahmen — ${f.name} hat keine`;
+  if (o.needsRack && !f.rackMounts) return `braucht montierten Gepäckträger — ${f.name} hat keine Aufnahmen`;
+  return `nicht verbaubar auf ${f.name}`;
+}
+
+// Schwebendes Live-Panel: gewählte Komponenten + Preis, aktualisiert bei jedem Pick
+function updateLive() {
+  const el = document.getElementById('livepanel');
+  if (!_lastIntent || !_lastIntent.frameId || !window._res || !window._res.ok.length) { el.style.display = 'none'; return; }
+  const b = window._res.ok[0], c = b.config;
+  const items = ['motor','battery','extrabat','groupset','tire','wheelset','color','size','fender','rack','light','bottle','stand','seatpost','shock','bag','lock','childseat','signature']
+    .map(g => c[g]).filter(o => o && o.id !== 'none' && o.id !== 'std')
+    .map(o => `<div class="lp-item">• ${o.name}${o.id.startsWith('sig_') && _sigText ? ` · „${_sigText}"` : ''}${o.price ? ` <small>+${o.price} €</small>` : ''}</div>`).join('');
+  el.innerHTML = `<span class="lp-close" onclick="document.getElementById('livepanel').style.display='none'">✕</span>` +
+    `<h4>Dein neues Custom Bike</h4><div class="lp-item"><b>${b.frame.name}</b> <small>${b.frame.basePrice} €</small></div>` +
+    (items || `<div class="lp-item"><small>Basis — wähle Komponenten</small></div>`) +
+    `<div class="lp-price">${b.price} €</div>` +
+    `<button onclick="orderBuild()" style="margin-top:8px;width:100%;padding:8px;border:0;border-radius:20px;background:var(--accent);color:#fff;font-weight:600;cursor:pointer;font-size:13px">In den Warenkorb</button>`;
+  el.style.display = 'block';
+}
+
+function orderBuild() {
+  const b = window._res && window._res.ok[0];
+  if (!b) return;
+  const c = b.config;
+  const parts = Object.keys(c).filter(k => k !== 'frame')
+    .map(k => c[k]).filter(o => o && o.id !== 'none' && o.id !== 'std')
+    .map(o => o.name).join(', ');
+  cart.push({ item: `${b.frame.name} Custom (${parts || 'Basis'}${_sigText ? ` · Signatur "${_sigText}"` : ''}) — ${b.price} €`,
+    frameId: b.frame.id, paid: false,
+    ts: new Date().toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' }) });
+  localStorage.setItem('bikecart', JSON.stringify(cart));
+  renderCart(); renderOwned();
+  bubble(`Im Warenkorb: ${b.frame.name} Custom — ${b.price} € ✓\n„Zur Kasse" in der Sidebar schließt die Bestellung ab.`, 'bot');
+}
+
+function guidePick(group, id, label) {
+  bubble(label, 'user');
+  if (!_lastIntent) return;
+  const prev = _lastIntent[group];
+  _lastIntent[group] = id;
+  const res = Rules.recommend(_lastIntent);
+  if (!res.ok.length) {
+    _lastIntent[group] = prev;
+    const b = res.blocked[0];
+    bubble(`✗ ${label}: ${b ? b.reasons.join(' · ') : 'nicht verbaubar'}`, 'bot err');
+  } else {
+    window._res = res;
+    updateLive();
+    bubble(`✓ ${label} — Zwischenstand: ${res.ok[0].price} €`, 'bot');
+  }
+  guideNext(_lastIntent);
+}
+
+let _awaitSig = false, _sigText = null;
+
+function send() {
+  const q = document.getElementById('q');
+  const text = q.value.trim(); if (!text) return;
+  q.value = '';
+  bubble(text, 'user');
+
+  // Signatur-Texteingabe aktiv? → validieren (max 12 Zeichen, alphanumerisch)
+  if (_awaitSig) {
+    _awaitSig = false;
+    if (!/^[a-z0-9]{1,12}$/i.test(text)) {
+      bubble(`"${text}" geht nicht — max. 12 Zeichen, nur Buchstaben + Ziffern. Nochmal:`, 'bot');
+      _awaitSig = true;
+      return;
+    }
+    _sigText = text;
+    bubble(`Signatur "${text}" übernommen ✓ — wird auf den Rahmen geätzt.`, 'bot');
+    updateLive();
+    if (_lastIntent) guideNext(_lastIntent);
+    return;
+  }
+
+  // Abbruch-Antwort auf offene Rückfragen
+  if (/^(nein|abbrechen|abbruch|behalten)\b/.test(text.toLowerCase()) && _pending) {
+    _pending = null;
+    bubble("Okay — wir bleiben bei der laufenden Konfiguration.", 'bot');
+    if (_lastIntent) guideNext(_lastIntent);
+    return;
+  }
+
+  const intent = LLM.parse(text);
+
+  // Modellwechsel mitten im Guide → Rückfrage statt Kontext-Bruch
+  if (_lastIntent && intent.type === 'buy' && intent.frameId && intent.frameId !== _lastIntent.frameId && !_pending) {
+    const nf = FRAMES.find(x => x.id === intent.frameId);
+    bubble(`Wechsel zu ${nf.name}? Die laufende Konfiguration (${FRAMES.find(x => x.id === _lastIntent.frameId).name}) wird dabei verworfen — okay?`, 'bot');
+    chipRow(['ok', 'nein']);
+    _pending = intent;
+    return;
+  }
+
+  if (intent.type === 'reset') { _pending = null; _lastIntent = null; document.getElementById('livepanel').style.display = 'none'; bubble("Zurückgesetzt — neue Anfrage?", 'bot'); return; }
+  if (intent.type === 'order') {
+    const item = intent.text.replace(/^(bestelle|lege)\s+/i, '').replace(/\s+in den (waren)?korb.*$/i, '').trim();
+    cart.push({ item, frameId: _lastOwned, paid: false, ts: new Date().toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' }) });
+    localStorage.setItem('bikecart', JSON.stringify(cart));
+    renderCart(); renderOwned();
+    bubble(`Im Warenkorb: ${item} ✓\n„Zur Kasse" in der Sidebar schließt die Bestellung ab.`, 'bot');
+    return;
+  }
+  if (intent.type === 'unknown') { bubble("Das habe ich nicht verstanden — ich konfiguriere Fahrräder und Ersatzteile. Z.B.: 'ebike mtb großer akku' oder 'welcher akku passt für etrekking'.", 'bot'); return; }
+
+  if (intent.type === 'finish') {
+    if (!_lastIntent) { bubble("Nichts offen — beschreib erst, was du brauchst.", 'bot'); return; }
+    if (_lastIntent.signature && !_sigText) {
+      _awaitSig = true;
+      bubble("Fast fertig — welcher Text soll auf den Rahmen? (max. 12 Zeichen, Buchstaben + Ziffern)", 'bot');
+      return;
+    }
+    const res = Rules.recommend(_lastIntent);
+    if (res.ok.length) bubble("Finale Konfiguration:\n" + LLM.formatConfig(res.ok[0]) + "\n\n→ 'bestelle bike' legt es in den Warenkorb.", 'bot');
+    else bubble("Aktuell nicht verbaubar — siehe ✗-Gründe oben.", 'bot');
+    return;
+  }
+  if (intent.type === 'confirm') {
+    if (!_pending) { bubble("Nichts zu bestätigen — beschreib erst, was du brauchst.", 'bot'); return; }
+    const p = _pending; _pending = null;
+    run(p);
+    return;
+  }
+
+  // Verfeinerung der letzten Konfiguration (z.B. 'großer akku' nach dem Ergebnis)
+  if (!_pending && _lastIntent && intent.type === 'buy' && !intent.frameId) {
+    let touched = false;
+    for (const k of ['battery','extrabat','motor','fender','rack','light','groupset','tire','budget',
+                     'bottle','stand','seatpost','shock','bag','lock','childseat','signature','size','wheelset','color','ebike'])
+      if (intent[k] !== undefined) { _lastIntent[k] = intent[k]; touched = true; }
+    // genannte Gruppen ohne konkrete Wahl → verbaubare Varianten als Chips zeigen
+    let asked = false;
+    if (intent.askGroups && _lastIntent.frameId) {
+      const f = FRAMES.find(x => x.id === _lastIntent.frameId);
+      intent.askGroups.forEach(g => {
+        const opts = Rules.compatOptions(f, g).filter(o => o.id !== 'none');
+        if (!opts.length) bubble(`Dafür gibt's auf dem ${f.name} nichts Verbaubares${f.e ? '.' : ' — nur auf den E-Rahmen (eMTB / eTrekking).'}`, 'bot');
+        else {
+          asked = true;
+          bubble(ASK[g], 'bot');
+          guideChips(opts.map(o => ({ group: g, id: o.id, hex: o.hex,
+            label: (o.id === 'std' ? 'standard: ' : '') + (CHIP_LABEL[g] ? CHIP_LABEL[g](o) : o.name.toLowerCase())
+              + (o.price ? ` +${o.price} €` : '') })));
+        }
+      });
+    }
+    if (touched) {
+      const res = Rules.recommend(_lastIntent);
+      window._res = res;
+      updateLive();
+      res.ok.forEach(b => (b.warnings || []).forEach(w => bubble(`⚠ ${w}`, 'bot')));
+    }
+    if (touched || intent.askGroups) { if (!asked) guideNext(_lastIntent); return; }
+  }
+
+  // Folge-Nachricht mergen, wenn noch eine Frage offen ist
+  if (_pending && intent.type === 'buy') {
+    for (const k of ['frameId','ebike','battery','extrabat','motor','fender','rack','light','groupset','tire','budget',
+                     'bottle','stand','seatpost','shock','bag','lock','childseat','signature','size','wheelset','color'])
+      if (intent[k] !== undefined) _pending[k] = intent[k];
+    // Antrieb nachträglich → Rahmen auf E-Variante mappen
+    if (_pending.ebike === true) {
+      if (_pending.frameId === 'mtb' || _pending.frameId === 'fully' || _pending.frameId === 'gravel') _pending.frameId = 'emtb';
+      if (_pending.frameId === 'trekking') _pending.frameId = 'etrek';
+      if (_pending.frameId === 'road') _pending.eRoadRequest = true;
+    }
+    bubble(LLM.confirmText(_pending), 'bot');
+    // offene Entscheidungen mitnehmen: Antrieb noch unklar?
+    if (_pending.type === 'buy' && _pending.ebike === undefined) {
+      bubble("Und: mit Motor oder muskelbetrieben?", 'bot');
+      chipRow(['ebike', 'normal']);
+    }
+    return;
+  }
+
+  _pending = intent;
+  // Service-Flows (Zubehör/Ersatz/Defekt) brauchen keine Bestätigung
+  if (intent.type === 'parts' || intent.type === 'defect') { _pending = null; run(intent); return; }
+  // zu vage → gezielt nachfragen statt leere Konfiguration bestaetigen
+  if (intent.type === 'buy' && intent.ebike === undefined && !intent.frameId) {
+    bubble("Gern! Damit ich das Richtige baue, zwei Fragen:\n\n1) Mit Motor (eBike) oder ohne?\n2) Wofür soll's sein? Grob:\n   • MTB Hardtail — Gelände/Trails, federt vorne (ab 899 €)\n   • MTB Fully — ruppiges Gelände, vollgefedert (ab 1499 €)\n   • Trekking — Alltag/Touren, Gepäckträger + Schutzblech (ab 749 €)\n   • Gravel — schnell auf Straße + Schotter (ab 1199 €)\n   • Rennrad — pur Asphalt, kein Gepäck (ab 1099 €)\n\nSag z.B. 'ebike trekking für den alltag' — dann frage ich gezielt nach.", 'bot');
+    chipRow(['mtb', 'fully', 'trekking', 'gravel', 'rennrad']);
+    return;
+  }
+  bubble(LLM.confirmText(intent), 'bot');
+}
+
+function run(intent) {
+  if (intent.eRoadRequest || (intent.ebike && intent.frameId === 'road')) {
+    bubble("E-Rennräder führen wir nicht im Sortiment. ✗\nDie nächsten eBike-Alternativen:\n• eMTB — wenn's Richtung Gelände geht (ab 1899 €)\n• eTrekking — wenn's der Alltags-Renner sein soll (ab 1799 €)\nWelche Richtung?", 'bot');
+    chipRow(['ebike mtb', 'ebike trekking']);
+    return;
+  }
+  if (intent.type === 'parts' || intent.type === 'spare' || intent.type === 'defect') {
+    if (!intent.frameId) {
+      bubble("Für welches deiner Bikes?", 'bot');
+      chipRow(CUSTOMER.owned.map(fid => `zubehör für ${FRAMES.find(f => f.id === fid).name}`));
+      return;
+    }
+    _lastOwned = intent.frameId;
+    const f = FRAMES.find(x => x.id === intent.frameId);
+    if (intent.type === 'defect') {
+      // Guided-Service: welches Teil ist beschädigt? → nur verbaubare Teile als Auswahl
+      const parts = Object.keys(OPTION_GROUPS).flatMap(g =>
+        Rules.compatOptions(f, g).filter(o => o.id !== 'none'));
+      bubble(`Okay — was ist an deinem ${f.name} beschädigt?`, 'bot');
+      chipRow(parts.slice(0, 10).map(o => `lege ${o.name} in den korb (Ersatz)`));
+      return;
+    }
+    showVariants(intent.frameId);
+    return;
+  }
+  const res = Rules.recommend(intent);
+  let txt = '';
+  if (res.ok.length && !intent.frameId) txt += `${res.ok.length} verbaubare Konfiguration${res.ok.length > 1 ? 'en' : ''}:\n`;
+  res.blocked.forEach(b => b.reasons.concat(b.warnings || []).forEach(r => txt += `✗ ${b.frame.name}: ${r}\n`));
+  const okWarns = [];
+  res.ok.forEach(b => (b.warnings || []).forEach(r => okWarns.push(r)));
+  if (res.overBudget.length) txt += `\nVerbaubar, aber über Budget:\n` +
+    res.overBudget.map(b => `• ${b.frame.name} — ${b.price} €`).join('\n');
+  if (okWarns.length) bubble('⚠ ' + okWarns.join('\n⚠ '), 'bot err');
+  if (txt) bubble(txt, txt.includes('✗') ? 'bot err' : 'bot');
+  else if (!res.ok.length) bubble('Nichts gefunden.', 'bot');
+  else if (intent.frameId) bubble(`Konfiguriere dein ${FRAMES.find(f => f.id === intent.frameId).name} ✨`, 'bot');
+  window._res = res;
+  updateLive();
+  if (res.ok.length) {
+    _lastIntent = intent;
+    if (res.ok.length === 1) { pick(0); guideNext(intent); return; }
+    bubble("Wähle eine Konfiguration:<br>" + res.ok.map((b, i) =>
+      `<span class="cfg" onclick="pick(${i})">${b.frame.name}<br><span class="price">${b.price} €</span></span>`).join(''), 'bot', true);
+    guideNext(intent);
+  }
+}
+
+// Geführter Ablauf: erst Core-Komponenten, dann Sonderzubehör
+const CORE_ORDER = ['motor','battery','groupset','tire','wheelset','color','size'];
+const EXTRA_ORDER = ['fender','rack','light','bottle','stand','seatpost','shock','bag','lock','childseat','signature','extrabat'];
+const CHIP_LABEL = {
+  motor:   o => o.name.toLowerCase().replace('motor','motor'),
+  battery: o => o.name.toLowerCase(),
+  groupset:o => o.name.toLowerCase(),
+  tire:    o => o.name.toLowerCase(),
+  wheelset:o => o.name.toLowerCase(),
+  color:   o => o.name.toLowerCase(),
+  size:    o => `größe ${o.id}`,
+};
+const ASK = {
+  motor:'Welcher Motor?', battery:'Welcher Akku?', groupset:'Welche Schaltung?',
+  tire:'Welche Bereifung?', wheelset:'Welcher Laufradsatz?', color:'Welche Farbe?',
+  size:'Welche Rahmengröße?',
+};
+
+function guideNext(intent) {
+  const f = FRAMES.find(x => x.id === intent.frameId);
+  if (!f) return;
+  for (const g of CORE_ORDER) {
+    if (intent[g] === undefined) {
+      const opts = Rules.compatOptions(f, g).filter(o => o.id !== 'none');
+      if (!opts.length) continue;
+      bubble(ASK[g], 'bot');
+      guideChips(opts.map(o => ({ group: g, id: o.id, hex: o.hex,
+        label: (o.id === 'std' ? 'standard: ' : '') + (CHIP_LABEL[g] ? CHIP_LABEL[g](o) : o.name.toLowerCase())
+          + (o.price ? ` +${o.price} €` : '') })));
+      return;
+    }
+  }
+  // Core komplett → Sonderzubehör-Phase (Multi-Select: Chips bleiben bis 'fertig')
+  const chosen = g => intent[g] !== undefined && intent[g] !== 'none';
+  const extras = EXTRA_ORDER.flatMap(g => {
+    if (chosen(g)) return [];
+    const okIds = new Set(Rules.compatOptions(f, g).map(o => o.id));
+    return OPTION_GROUPS[g].filter(o => o.id !== 'none')
+      .map(o => okIds.has(o.id)
+        ? { group: g, id: o.id, hex: o.hex, label: o.name.toLowerCase() + (o.price ? ` +${o.price} €` : '') }
+        : { label: o.name.toLowerCase() + (o.price ? ` +${o.price} €` : ''), disabled: true, reason: disabledReason(f, o) });
+  });
+  if (!intent._extrasOffered) {
+    intent._extrasOffered = true;
+    bubble("Core-Konfig komplett ✓\nJetzt Sonderzubehör — mehrere Chips wählbar, 'fertig' zum Abschluss:", 'bot');
+    guideChips(extras);
+  }
+  if (intent.signature && !_sigText && !_awaitSig) {
+    _awaitSig = true;
+    bubble("Welcher Text soll auf den Rahmen? (max. 12 Zeichen, Buchstaben + Ziffern)", 'bot');
+    return;
+  }
+  if (_awaitSig) return;
+  if (extras.length) {
+    bubble("Noch was dazu? — sonst 'fertig':", 'bot');
+    guideChips(extras);
+  } else if (!intent._allDone) {
+    intent._allDone = true;
+    bubble("Alles dran, was verbaubar ist ✓ — 'fertig' für die Zusammenfassung.", 'bot');
+  }
+  return;
+}
+
+function pick(i) {
+  bubble(LLM.formatConfig(window._res.ok[i]) + "\n\n→ Gesamtpreis inkl. aller Optionen.\nVerfeinern? Sag z.B. 'großer akku', 'schutzblech', 'größe l' — ich rechne neu.", 'bot');
+}
+
+document.getElementById('q').addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+bubble("👋 BikeConfigurator bereit. Sag z.B.: 'ebike mtb großer akku schutzblech unter 3500 euro' — ich prüfe Verbaubarkeit + Preis. Für Ersatzteile: 'welcher akku passt für etrekking'.", 'bot');
+</script>
+</body>
+</html>
