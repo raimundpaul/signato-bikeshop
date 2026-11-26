@@ -79,23 +79,27 @@
 <script src="js/llm.js"></script>
 <script>
 let _pending = null, _lastIntent = null;
-let cart = JSON.parse(localStorage.getItem('bikecart') || '[]');
-let myBikes = JSON.parse(localStorage.getItem('mybikes') || '[]');
+// Session-State bewusst NICHT persistiert: F5 = Demo-Reset (mehrere Tester
+// auf derselben Maschine starten immer mit Max' zwei Original-Bikes)
+let cart = [];
+let myBikes = [];
+let _accItems = []; // Zubehör-Auswahl im Panel (noch nicht im Warenkorb)
+
+const priceOf = name => {
+  for (const g of Object.values(OPTION_GROUPS)) { const o = g.find(x => x.name === name); if (o) return o.price; }
+  return 0;
+};
 
 function renderCart() {
   // nur unbezahlte Positionen; bezahlte wandern unter "Bestelltes Zubehör" ans Bike
   const open = cart.map((c, i) => ({ ...c, i })).filter(c => !c.paid);
   if (!open.length) { document.getElementById('cart').innerHTML = '<div class="opt">Ihr Warenkorb ist leer.</div>'; return; }
-  const priceOf = name => {
-    for (const g of Object.values(OPTION_GROUPS)) { const o = g.find(x => x.name === name); if (o) return o.price; }
-    return 0;
-  };
-  const sum = open.reduce((s, c) => s + priceOf(c.item), 0);
+  const sum = open.reduce((s, c) => s + (c.price !== undefined ? c.price : priceOf(c.item)), 0);
   document.getElementById('cart').innerHTML =
     open.map(c => {
       const f = c.frameId ? FRAMES.find(x => x.id === c.frameId) : null;
       const p = priceOf(c.item);
-      return `<div class="opt">${c.item}${f ? ` <small>→ ${f.name}</small>` : ''}${p ? ` <small>${p} €</small>` : ''} <a href="#" onclick="cart.splice(${c.i},1);localStorage.setItem('bikecart',JSON.stringify(cart));renderCart();renderOwned();return false" style="color:#f88">✕</a></div>`;
+      return `<div class="opt">${c.item}${f ? ` <small>→ ${f.name}</small>` : ''}${p ? ` <small>${p} €</small>` : ''} <a href="#" onclick="cart.splice(${c.i},1);renderCart();renderOwned();return false" style="color:#f88">✕</a></div>`;
     }).join('') +
     `<div style="margin-top:8px;border-top:1px solid var(--line);padding-top:6px;font-size:12px"><b>Summe: ${sum} €</b><br><button onclick="checkout()" style="margin-top:6px;padding:6px 14px;border:0;border-radius:14px;background:var(--accent);color:#fff;cursor:pointer;font-size:12px">Zur Kasse</button></div>`;
 }
@@ -112,9 +116,8 @@ function checkout() {
       newBikes++;
     }
   });
-  localStorage.setItem('bikecart', JSON.stringify(cart));
-  localStorage.setItem('mybikes', JSON.stringify(myBikes));
   renderCart(); renderOwned();
+  document.getElementById('livepanel').style.display = 'none';
   bubble(`Bezahlung abgeschlossen ✓ — ${open.length} Position${open.length > 1 ? 'en' : ''} gebucht.` +
     (newBikes ? `\n${newBikes === 1 ? 'Dein neues Bike steht' : 'Deine neuen Bikes stehen'} jetzt unter „Meine Bikes".` : '') +
     `\n(Demo-Checkout — hier käme Payment/Order-Management.)`, 'bot');
@@ -149,7 +152,7 @@ function renderOwned() {
     const mine = cart.map((c, i) => ({ ...c, i })).filter(c => c.frameId === fid && c.paid && !c.isBike);
     const drop = `<details style="margin-top:4px" onclick="event.stopPropagation()"><summary style="font-size:11px;color:var(--accent);cursor:pointer">Bestelltes Zubehör (${mine.length})</summary>` +
       (mine.length
-        ? mine.map(c => `<div class="opt">✓ ${c.item} <small>· ${c.ts}</small> <a href="#" onclick="event.stopPropagation();cart.splice(${c.i},1);localStorage.setItem('bikecart',JSON.stringify(cart));renderCart();renderOwned();return false" style="color:#f88">✕</a></div>`).join('')
+        ? mine.map(c => `<div class="opt">✓ ${c.item} <small>· ${c.ts}</small> <a href="#" onclick="event.stopPropagation();cart.splice(${c.i},1);renderCart();renderOwned();return false" style="color:#f88">✕</a></div>`).join('')
         : '<div class="opt">— nichts bestellt —</div>') + '</details>';
     return `<div class="owned" onclick="ownedBike('${fid}')"><b>${f.name}</b>${f.e ? ' ⚡' : ''}<br><small>${order ? order.config + ' · ' + order.date : ''}</small>${equip}${drop}</div>`;
   }).join('');
@@ -168,6 +171,7 @@ function bikeMenu(fid) {
 }
 function showVariants(fid) {
   _lastOwned = fid;
+  _accItems = []; // neues Bike → Panel-Sammlung verwerfen
   const f = FRAMES.find(x => x.id === fid);
   const r = Rules.spareParts(fid, 'battery');
   let txt = `Varianten für dein <b>${f.name}</b>:`;
@@ -195,8 +199,9 @@ function showVariants(fid) {
     d.appendChild(b);
   });
   document.getElementById('chat').appendChild(d);
-  if (r.parts.length) chipRow(r.parts.map(o => `lege ${o.name} in den korb`));
+  if (r.parts.length) accChips(r.parts);
   d.scrollIntoView();
+  updateAcc(); // Panel direkt öffnen (Leer-Stand: "noch leer — wähle eine Kategorie")
 }
 
 const ZUB_LABEL = { motor:'motor', battery:'akku', extrabat:'zusatzakku', groupset:'schaltung',
@@ -204,12 +209,31 @@ const ZUB_LABEL = { motor:'motor', battery:'akku', extrabat:'zusatzakku', groups
   stand:'ständer', seatpost:'sattelstütze', shock:'dämpfer', bag:'rahmentasche', lock:'schloss',
   childseat:'kindersitz', signature:'signatur', color:'farbe', size:'größe', wheelset:'laufräder' };
 
-// Kategorie geklickt → verbaubare Optionen dieser Gruppe als Korb-Chips
+// Kategorie geklickt → verbaubare Optionen dieser Gruppe als Direkt-Korb-Chips
 function showGroup(fid, g) {
   const f = FRAMES.find(x => x.id === fid);
   const opts = Rules.compatOptions(f, g).filter(o => o.id !== 'none' && !o.spare);
   bubble(`${ZUB_LABEL[g] || g} für dein ${f.name}:`, 'bot');
-  chipRow(opts.map(o => `lege ${o.name} in den korb`));
+  accChips(opts);
+}
+
+// Optionen direkt in den Korb — wie guidePick, ohne Umweg über den Parser
+function accChips(opts) {
+  const d = document.createElement('div');
+  d.className = 'chiprow';
+  opts.forEach(o => {
+    const b = document.createElement('button');
+    b.className = 'chip'; b.textContent = `${o.name} +${o.price} €`;
+    b.onclick = () => orderAcc(o.name);
+    d.appendChild(b);
+  });
+  document.getElementById('chat').appendChild(d);
+  d.scrollIntoView();
+}
+function orderAcc(name) {
+  bubble(`lege ${name} in den korb`, 'user');
+  _accItems.push({ item: name });
+  updateAcc();
 }
 
 function bubble(text, cls, html) {
@@ -226,7 +250,7 @@ function chipRow(labels) {
   labels.forEach(l => {
     const b = document.createElement('button');
     b.className = 'chip'; b.textContent = l;
-    b.onclick = () => { document.getElementById('q').value = l; send(); };
+    b.onclick = () => { document.getElementById('q').value = l; send(); document.getElementById('q').focus(); };
     d.appendChild(b);
   });
   document.getElementById('chat').appendChild(d);
@@ -273,14 +297,51 @@ function updateLive() {
   if (!_lastIntent || !_lastIntent.frameId || !window._res || !window._res.ok.length) { el.style.display = 'none'; return; }
   const b = window._res.ok[0], c = b.config;
   const items = ['motor','battery','extrabat','groupset','tire','wheelset','color','size','fender','rack','light','bottle','stand','seatpost','shock','bag','lock','childseat','signature']
-    .map(g => c[g]).filter(o => o && o.id !== 'none' && o.id !== 'std')
-    .map(o => `<div class="lp-item">• ${o.name}${o.id.startsWith('sig_') && _sigText ? ` · „${_sigText}"` : ''}${o.price ? ` <small>+${o.price} €</small>` : ''}</div>`).join('');
+    .map(g => ({ g, o: c[g] })).filter(x => x.o && x.o.id !== 'none' && x.o.id !== 'std')
+    .map(x => `<div class="lp-item">• ${x.o.name}${x.o.id.startsWith('sig_') && _sigText ? ` · „${_sigText}"` : ''}${x.o.price ? ` <small>+${x.o.price} €</small>` : ''} <a href="#" onclick="unpickGroup('${x.g}');return false" style="color:#f88">✕</a></div>`).join('');
   el.innerHTML = `<span class="lp-close" onclick="document.getElementById('livepanel').style.display='none'">✕</span>` +
     `<h4>Dein neues Custom Bike</h4><div class="lp-item"><b>${b.frame.name}</b> <small>${b.frame.basePrice} €</small></div>` +
     (items || `<div class="lp-item"><small>Basis — wähle Komponenten</small></div>`) +
     `<div class="lp-price">${b.price} €</div>` +
     `<button onclick="orderBuild()" style="margin-top:8px;width:100%;padding:8px;border:0;border-radius:20px;background:var(--accent);color:#fff;font-weight:600;cursor:pointer;font-size:13px">In den Warenkorb</button>`;
   el.style.display = 'block';
+}
+
+// Komponente im Custom-Bike-Panel entfernen → Gruppe zurück auf offen
+function unpickGroup(g) {
+  if (!_lastIntent) return;
+  delete _lastIntent[g];
+  if (g === 'signature') _sigText = null;
+  const res = Rules.recommend(_lastIntent);
+  window._res = res;
+  updateLive();
+}
+
+// Zubehör-Sammelpanel: zeigt die im Panel gesammelte Auswahl (noch nicht im Korb)
+function updateAcc() {
+  const el = document.getElementById('livepanel');
+  if (!_lastOwned) { el.style.display = 'none'; return; }
+  const f = FRAMES.find(x => x.id === _lastOwned);
+  const sum = _accItems.reduce((s, c) => s + (priceOf(c.item) || 0), 0);
+  el.innerHTML = `<span class="lp-close" onclick="document.getElementById('livepanel').style.display='none'">✕</span>` +
+    `<h4>Zubehör für ${f.name}</h4>` +
+    (_accItems.length
+      ? _accItems.map((c, i) => `<div class="lp-item">• ${c.item} <small>+${priceOf(c.item) || 0} €</small> <a href="#" onclick="_accItems.splice(${i},1);updateAcc();return false" style="color:#f88">✕</a></div>`).join('')
+      : `<div class="lp-item"><small>noch leer — wähle eine Kategorie</small></div>`) +
+    `<div class="lp-price">${sum} €</div>` +
+    (_accItems.length ? `<button onclick="commitAcc()" style="margin-top:8px;width:100%;padding:8px;border:0;border-radius:20px;background:var(--accent);color:#fff;font-weight:600;cursor:pointer;font-size:13px">In den Warenkorb</button>` : '');
+  el.style.display = 'block';
+}
+
+// Panel-Auswahl → Warenkorb (alle gesammelten Positionen auf einmal)
+function commitAcc() {
+  _accItems.forEach(c => cart.push({ item: c.item, frameId: _lastOwned, paid: false,
+    ts: new Date().toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' }) }));
+  const n = _accItems.length;
+  _accItems = [];
+  renderCart(); renderOwned();
+  document.getElementById('livepanel').style.display = 'none';
+  bubble(`${n} Position${n > 1 ? 'en' : ''} im Warenkorb ✓ — „Zur Kasse" in der Sidebar schließt ab.`, 'bot');
 }
 
 function orderBuild() {
@@ -292,9 +353,11 @@ function orderBuild() {
     .map(o => o.name).join(', ');
   cart.push({ isBike: true, frameId: b.frame.id, config: parts || 'Basis', price: b.price,
     item: `${b.frame.name} Custom (${parts || 'Basis'}${_sigText ? ` · Signatur "${_sigText}"` : ''}) — ${b.price} €`,
-    frameId: b.frame.id, paid: false,
+    paid: false,
     ts: new Date().toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' }) });
-  localStorage.setItem('bikecart', JSON.stringify(cart));
+  // Konfig abgeschlossen → Dialog-State zurücksetzen (Signatur-Abfrage, Guide, Live-Panel)
+  _awaitSig = false; _sigText = null; _pending = null; _lastIntent = null;
+  document.getElementById('livepanel').style.display = 'none';
   renderCart(); renderOwned();
   bubble(`Im Warenkorb: ${b.frame.name} Custom — ${b.price} € ✓\n„Zur Kasse" in der Sidebar schließt die Bestellung ab.`, 'bot');
 }
@@ -317,12 +380,13 @@ function guidePick(group, id, label) {
   guideNext(_lastIntent);
 }
 
-let _awaitSig = false, _sigText = null;
+let _awaitSig = false, _sigText = null, _reqId = 0;
 
 async function send() {
   const q = document.getElementById('q');
   const text = q.value.trim(); if (!text) return;
   q.value = '';
+  q.focus();
   bubble(text, 'user');
 
   // Signatur-Texteingabe aktiv? → validieren (max 12 Zeichen, alphanumerisch)
@@ -340,15 +404,27 @@ async function send() {
     return;
   }
 
-  // Abbruch-Antwort auf offene Rückfragen
+  // Abbruch-Antwort auf offene Rückfragen — aber nur, wenn nichts weiter folgt
+  // ('nein emtb' = Abbruch + neue Anfrage, nicht nur Abbruch)
   if (/^(nein|abbrechen|abbruch|behalten)\b/.test(text.toLowerCase()) && _pending) {
-    _pending = null;
-    bubble("Okay — wir bleiben bei der laufenden Konfiguration.", 'bot');
-    if (_lastIntent) guideNext(_lastIntent);
-    return;
+    const rest = text.toLowerCase().replace(/^(nein|abbrechen|abbruch|behalten)\b[,\s]*/, '').trim();
+    if (!rest) {
+      _pending = null;
+      bubble("Okay — wir bleiben bei der laufenden Konfiguration.", 'bot');
+      if (_lastIntent) guideNext(_lastIntent);
+      return;
+    }
+    _pending = null; // Abbruch durchführen, Rest normal weiterverarbeiten
   }
 
+  // Demo-Reset: State ist session-only → Reload = Werkszustand
+  if (/^(reset ?(all|alles|demo)|demo ?reset)/.test(text.toLowerCase())) {
+    location.reload(); return;
+  }
+
+  const myReq = ++_reqId;
   const intent = await LLM.parse(text);
+  if (myReq !== _reqId) return; // älterer Request → Ergebnis verwerfen (Race bei Schnellklicken)
   document.getElementById('eng').textContent = LLM.llmActive ? '🧠 llm' : '🔤 regex';
 
   // Modellwechsel mitten im Guide → Rückfrage statt Kontext-Bruch
@@ -362,10 +438,10 @@ async function send() {
 
   if (intent.type === 'reset') { _pending = null; _lastIntent = null; document.getElementById('livepanel').style.display = 'none'; bubble("Zurückgesetzt — neue Anfrage?", 'bot'); return; }
   if (intent.type === 'order') {
-    const item = intent.text.replace(/^(bestelle|lege)\s+/i, '').replace(/\s+in den (waren)?korb.*$/i, '').trim();
+    const item = (intent.text || text).replace(/^(bestelle|lege)\s+/i, '').replace(/\s+in den (waren)?korb.*$/i, '').trim();
     cart.push({ item, frameId: _lastOwned, paid: false, ts: new Date().toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' }) });
-    localStorage.setItem('bikecart', JSON.stringify(cart));
-    renderCart(); renderOwned();
+
+    renderCart(); renderOwned(); updateAcc();
     bubble(`Im Warenkorb: ${item} ✓\n„Zur Kasse" in der Sidebar schließt die Bestellung ab.`, 'bot');
     return;
   }
@@ -426,11 +502,14 @@ async function send() {
     for (const k of ['frameId','ebike','battery','extrabat','motor','fender','rack','light','groupset','tire','budget',
                      'bottle','stand','seatpost','shock','bag','lock','childseat','signature','size','wheelset','color'])
       if (intent[k] !== undefined) _pending[k] = intent[k];
-    // Antrieb nachträglich → Rahmen auf E-Variante mappen
+    // Antrieb nachträglich → Rahmen auf E-Variante mappen (mit Hinweis)
     if (_pending.ebike === true) {
-      if (_pending.frameId === 'mtb' || _pending.frameId === 'fully' || _pending.frameId === 'gravel') _pending.frameId = 'emtb';
-      if (_pending.frameId === 'trekking') _pending.frameId = 'etrek';
-      if (_pending.frameId === 'road') _pending.eRoadRequest = true;
+      const before = _pending.frameId;
+      if (['mtb', 'fully', 'gravel'].includes(before)) _pending.frameId = 'emtb';
+      if (before === 'trekking') _pending.frameId = 'etrek';
+      if (before === 'road') _pending.eRoadRequest = true;
+      if (before !== _pending.frameId && before !== 'road')
+        bubble(`Kein E-${FRAMES.find(x => x.id === before).name} im Sortiment — ich nehme das nächste E-Modell.`, 'bot');
     }
     bubble(LLM.confirmText(_pending), 'bot');
     // offene Entscheidungen mitnehmen: Antrieb noch unklar?
@@ -450,6 +529,8 @@ async function send() {
     chipRow(['mtb', 'fully', 'trekking', 'gravel', 'rennrad']);
     return;
   }
+  if (intent._remappedFrom)
+    bubble(`Kein E-${FRAMES.find(x => x.id === intent._remappedFrom).name} im Sortiment — ich nehme das nächste E-Modell.`, 'bot');
   bubble(LLM.confirmText(intent), 'bot');
 }
 
@@ -472,7 +553,7 @@ function run(intent) {
       const parts = Object.keys(OPTION_GROUPS).filter(g => !['color', 'size', 'signature'].includes(g)).flatMap(g =>
         Rules.compatOptions(f, g).filter(o => o.id !== 'none'));
       bubble(`Okay — was ist an deinem ${f.name} beschädigt?`, 'bot');
-      chipRow(parts.slice(0, 10).map(o => `lege ${o.name} in den korb (Ersatz)`));
+      accChips(parts.slice(0, 10));
       return;
     }
     showVariants(intent.frameId);

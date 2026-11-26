@@ -1,4 +1,8 @@
 // Parser-Tests: node test.js  (kein Browser noetig — nur llm.js + data.js + rules.js)
+// HINWEIS: testet nur den Regex-Fallback (_parseRegex). Der Ollama-Pfad ist
+// browser-only + localhost-only (github.io -> localhost blockt Chrome als
+// Private Network Access) und wird manuell ueber das Engine-Badge geprueft:
+// 🧠 llm auf localhost:8124, 🔤 regex auf der GitHub-Pages-Demo.
 const fs = require('fs');
 const src = ['js/data.js', 'js/rules.js', 'js/llm.js'].map(f => fs.readFileSync(f, 'utf8')).join('\n');
 const { LLM, Rules, FRAMES } = eval(src + '\n;({ LLM, Rules, FRAMES })');

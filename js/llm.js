@@ -96,7 +96,7 @@ Regeln: "type"=parts bei Ersatzteil/Zubehoer-Anfrage fuer Bestandsbike, "defect"
       if (intent.frameId === 'mtb') intent.frameId = 'emtb';
       if (intent.frameId === 'trekking') intent.frameId = 'etrek';
       if (intent.frameId === 'road') intent.eRoadRequest = true;   // Constraint: kein eRennrad im Sortiment
-      if (['fully', 'gravel'].includes(intent.frameId)) intent.frameId = 'emtb'; // naechste E-Variante
+      if (['fully', 'gravel'].includes(intent.frameId)) { intent._remappedFrom = intent.frameId; intent.frameId = 'emtb'; } // naechste E-Variante
     }
 
     // --- Optionen ---
